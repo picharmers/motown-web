@@ -4,9 +4,7 @@ import com.amazonaws.services.dynamodbv2.AmazonDynamoDB;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient;
 import com.amazonaws.services.dynamodbv2.datamodeling.DynamoDBMapper;
 import com.amazonaws.services.dynamodbv2.datamodeling.DynamoDBQueryExpression;
-import com.amazonaws.services.dynamodbv2.datamodeling.PaginatedQueryList;
 import com.amazonaws.services.dynamodbv2.model.*;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
@@ -28,26 +26,25 @@ public class MotownServlet extends HttpServlet {
     }
 
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+        MotownParams params = new MotownParams(request);
+        List<TrafficEvent> events = getTrafficEvents(params);
+        List<TrafficSummary> trafficData = getTrafficData(events);
 
-        String customerId = request.getParameter("customer_id");
-        String deviceId = request.getParameter("device_id");
-        String callback = request.getParameter("callback");
-        int timespanInDays = Integer.parseInt(request.getParameter("timespan"));
+        setupResponse(response);
 
-        if (callback == null) {
-            callback = "callback";
+        PrintWriter writer = response.getWriter();
+        writer.println(params.getCallback() + "( [");
+        for (Iterator<TrafficSummary> itr = trafficData.iterator(); itr.hasNext();) {
+            TrafficSummary summary = itr.next();
+            writer.println(summary.asJson());
+            if (itr.hasNext()) {
+                writer.println(", ");
+            }
         }
+        writer.println("] )");
+    }
 
-        Calendar timespan = Calendar.getInstance();
-        timespan.roll(Calendar.DAY_OF_MONTH, -timespanInDays);
-
-        List<TrafficEvent> events = null;
-        if (deviceId.equalsIgnoreCase("all")) {
-            events = getTrafficEventsForAllDevices(customerId, timespan);
-        } else {
-            events = getTrafficEventsForOneDevice(customerId, deviceId, timespan);
-        }
-
+    private List<TrafficSummary> getTrafficData(List<TrafficEvent> events) {
         List<TrafficSummary> trafficData = new ArrayList<>();
         Map<String, List<TrafficEvent>> eventMap = new HashMap<>();
         for (TrafficEvent event : events) {
@@ -65,19 +62,17 @@ public class MotownServlet extends HttpServlet {
             List<TrafficEvent> trafficEvents = eventMap.get(dateHour);
             trafficData.add(new TrafficSummary(Long.valueOf(dateHour), trafficEvents.size()));
         }
+        return trafficData;
+    }
 
-        setupResponse(response);
-
-        PrintWriter writer = response.getWriter();
-        writer.println(callback + "( [");
-        for (Iterator<TrafficSummary> itr = trafficData.iterator(); itr.hasNext();) {
-            TrafficSummary summary = itr.next();
-            writer.println(summary.asJson());
-            if (itr.hasNext()) {
-                writer.println(", ");
-            }
+    private List<TrafficEvent> getTrafficEvents(MotownParams params) {
+        List<TrafficEvent> events = null;
+        if (params.isAllDevices()) {
+            events = getTrafficEventsForAllDevices(params);
+        } else {
+            events = getTrafficEventsForOneDevice(params);
         }
-        writer.println("] )");
+        return events;
     }
 
     private void setupResponse(HttpServletResponse response) {
@@ -94,25 +89,23 @@ public class MotownServlet extends HttpServlet {
         return mapper.query(CustomerDevice.class, expression);
     }
 
-    private List<TrafficEvent> getTrafficEventsForOneDevice(String customerId, String deviceId, Calendar timespan) {
-        String customerDevice = customerId + "::" + deviceId;
-
+    private List<TrafficEvent> getTrafficEventsForOneDevice(MotownParams params) {
         Condition condition = new Condition()
                 .withComparisonOperator(ComparisonOperator.GT.toString())
-                .withAttributeValueList(new AttributeValue().withS(String.valueOf(timespan.getTimeInMillis())));
+                .withAttributeValueList(new AttributeValue().withS(params.getSince()));
 
         DynamoDBQueryExpression<TrafficEvent> expression = new DynamoDBQueryExpression<TrafficEvent>()
-                .withHashKeyValues(new TrafficEvent().withCustomerDevice(customerDevice))
+                .withHashKeyValues(new TrafficEvent().withCustomerDevice(params.getCustomerDevice()))
                 .withRangeKeyCondition("timestamp", condition);
 
         return mapper.query(TrafficEvent.class, expression);
     }
 
-    private List<TrafficEvent> getTrafficEventsForAllDevices(String customerId, Calendar timespan) {
-        List<CustomerDevice> customerDevices = getCustomerDevices(customerId);
+    private List<TrafficEvent> getTrafficEventsForAllDevices(MotownParams params) {
+        List<CustomerDevice> customerDevices = getCustomerDevices(params.getCustomerId());
         List<TrafficEvent> allDeviceEvents = new ArrayList<>();
         for (CustomerDevice customerDevice : customerDevices) {
-            allDeviceEvents.addAll(getTrafficEventsForOneDevice(customerId, customerDevice.getDeviceId(), timespan));
+            allDeviceEvents.addAll(getTrafficEventsForOneDevice(params));
         }
         return allDeviceEvents;
     }
