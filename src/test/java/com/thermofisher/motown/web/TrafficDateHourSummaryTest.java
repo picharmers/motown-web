@@ -7,13 +7,13 @@ import org.junit.Test;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 
-public class TrafficSummaryTest {
+public class TrafficDateHourSummaryTest {
 
-    private TrafficSummary summary;
+    private TrafficDateHourSummary summary;
 
     @Before
     public void setup() throws Exception {
-        summary = new TrafficSummary(120L, 10);
+        summary = new TrafficDateHourSummary(120L, 10);
     }
 
     @After
